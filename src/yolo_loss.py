@@ -106,7 +106,13 @@ class YOLOv2PersonLoss(nn.Module):
 
         if self.attack_type == "obj":
 
-            score = objectness
+            # For now, target objectness specifically
+            # where YOLO believes the object is a person.
+            score = (
+                objectness
+                *
+                person_probability
+            )
 
         elif self.attack_type == "cls":
 
