@@ -105,6 +105,12 @@ def main():
 
     print(f"Original image size: {image.size}")
 
+    # Resize image to YOLOv2 network input size
+    image = image.resize((model.width, model.height))
+
+    print(f"YOLO input size: {image.size}")
+
+
     # --------------------------------------------------
     # Detection
     # --------------------------------------------------
@@ -118,7 +124,7 @@ def main():
         NMS_THRESHOLD,
         USE_CUDA
     )
-
+    
     print()
     print(f"Total detections: {len(boxes)}")
     print()

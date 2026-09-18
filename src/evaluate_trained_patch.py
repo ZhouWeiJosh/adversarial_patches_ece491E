@@ -1,0 +1,489 @@
+from pathlib import Path
+
+import torch
+from PIL import Image
+from torchvision.transforms import functional as TF
+
+from darknet import Darknet
+from utils import do_detect
+
+from patch_utils import (
+    create_random_patch,
+    resize_patch,
+    place_patch_on_image
+)
+
+
+# ==================================================
+# Paths
+# ==================================================
+
+ROOT = Path(__file__).resolve().parent.parent
+
+CFG_PATH = ROOT / "cfg" / "yolo.cfg"
+WEIGHTS_PATH = ROOT / "weights" / "yolo.weights"
+
+IMAGE_PATH = (
+    ROOT
+    / "data"
+    / "test_images"
+    / "crop001001.png"
+)
+
+TRAINED_PATCH_PATH = (
+    ROOT
+    / "patches"
+    / "one_image_patch.png"
+)
+
+RESULTS_DIR = (
+    ROOT
+    / "results"
+    / "images"
+)
+
+
+# ==================================================
+# Settings
+# ==================================================
+
+YOLO_SIZE = 416
+
+CONF_THRESHOLD = 0.4
+NMS_THRESHOLD = 0.4
+
+PATCH_SCALE = 0.25
+
+USE_CUDA = torch.cuda.is_available()
+
+
+# ==================================================
+# Helper
+# ==================================================
+
+def get_best_person_confidence(boxes):
+    """
+    Return the highest final person confidence.
+
+    Assumes:
+        box[4] = objectness
+        box[5] = class confidence
+        box[6] = class ID
+
+    COCO person class = 0
+    """
+
+    best_confidence = 0.0
+
+    for box in boxes:
+
+        class_id = int(box[6])
+
+        if class_id != 0:
+            continue
+
+        objectness = box[4]
+        class_confidence = box[5]
+
+        # detach() avoids the warning you saw earlier
+        if torch.is_tensor(objectness):
+            objectness = objectness.detach().cpu().item()
+        else:
+            objectness = float(objectness)
+
+        if torch.is_tensor(class_confidence):
+            class_confidence = (
+                class_confidence
+                .detach()
+                .cpu()
+                .item()
+            )
+        else:
+            class_confidence = float(
+                class_confidence
+            )
+
+        final_confidence = (
+            objectness
+            * class_confidence
+        )
+
+        best_confidence = max(
+            best_confidence,
+            final_confidence
+        )
+
+    return best_confidence
+
+
+def run_detection(
+    model,
+    image
+):
+    boxes = do_detect(
+        model,
+        image,
+        CONF_THRESHOLD,
+        NMS_THRESHOLD,
+        USE_CUDA
+    )
+
+    confidence = (
+        get_best_person_confidence(
+            boxes
+        )
+    )
+
+    return boxes, confidence
+
+
+def save_tensor_image(
+    tensor,
+    path
+):
+    """
+    tensor expected shape:
+        [3, H, W]
+    """
+
+    image = TF.to_pil_image(
+        tensor.detach().cpu()
+    )
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    image.save(path)
+
+
+# ==================================================
+# Main
+# ==================================================
+
+def main():
+
+    print("======================================")
+    print("EVALUATE TRAINED PATCH")
+    print("======================================")
+
+    print(
+        f"Device: "
+        f"{'CUDA' if USE_CUDA else 'CPU'}"
+    )
+
+    print()
+
+    # ------------------------------------------------
+    # File checks
+    # ------------------------------------------------
+
+    if not TRAINED_PATCH_PATH.exists():
+
+        print(
+            "ERROR: trained patch not found:"
+        )
+
+        print(
+            TRAINED_PATCH_PATH
+        )
+
+        return
+
+    # ------------------------------------------------
+    # Load YOLO
+    # ------------------------------------------------
+
+    print("Loading YOLOv2...")
+
+    model = Darknet(
+        str(CFG_PATH)
+    )
+
+    model.load_weights(
+        str(WEIGHTS_PATH)
+    )
+
+    model.eval()
+
+    if USE_CUDA:
+        model.cuda()
+
+    print("YOLO loaded.")
+    print()
+
+    # ------------------------------------------------
+    # Load image
+    # ------------------------------------------------
+
+    original_image = Image.open(
+        IMAGE_PATH
+    ).convert("RGB")
+
+    print(
+        f"Original image size: "
+        f"{original_image.size}"
+    )
+
+    # Match training dimensions
+    image = original_image.resize(
+        (
+            YOLO_SIZE,
+            YOLO_SIZE
+        )
+    )
+
+    print(
+        f"YOLO input size: "
+        f"{image.size}"
+    )
+
+    image_tensor = TF.to_tensor(
+        image
+    )
+
+    _, height, width = (
+        image_tensor.shape
+    )
+
+    # =================================================
+    # 1. CLEAN
+    # =================================================
+
+    print()
+    print("Running CLEAN detection...")
+
+    clean_boxes, clean_confidence = (
+        run_detection(
+            model,
+            image
+        )
+    )
+
+    # =================================================
+    # 2. RANDOM PATCH
+    # =================================================
+
+    print("Running RANDOM PATCH detection...")
+
+    random_patch = (
+        create_random_patch(
+            patch_size=100
+        )
+    )
+
+    target_patch_size = int(
+        width
+        * PATCH_SCALE
+    )
+
+    random_patch = resize_patch(
+        random_patch,
+        target_patch_size
+    )
+
+    random_patched_tensor = (
+        place_patch_on_image(
+            image_tensor,
+            random_patch,
+            width // 2,
+            height // 2
+        )
+    )
+
+    random_patched_image = (
+        TF.to_pil_image(
+            random_patched_tensor
+        )
+    )
+
+    (
+        random_boxes,
+        random_confidence
+    ) = run_detection(
+        model,
+        random_patched_image
+    )
+
+    # =================================================
+    # 3. TRAINED PATCH
+    # =================================================
+
+    print("Running TRAINED PATCH detection...")
+
+    trained_patch_image = (
+        Image.open(
+            TRAINED_PATCH_PATH
+        )
+        .convert("RGB")
+    )
+
+    trained_patch = TF.to_tensor(
+        trained_patch_image
+    )
+
+    trained_patch = resize_patch(
+        trained_patch,
+        target_patch_size
+    )
+
+    trained_patched_tensor = (
+        place_patch_on_image(
+            image_tensor,
+            trained_patch,
+            width // 2,
+            height // 2
+        )
+    )
+
+    trained_patched_image = (
+        TF.to_pil_image(
+            trained_patched_tensor
+        )
+    )
+
+    (
+        trained_boxes,
+        trained_confidence
+    ) = run_detection(
+        model,
+        trained_patched_image
+    )
+
+    # =================================================
+    # Save images
+    # =================================================
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    image.save(
+        RESULTS_DIR
+        / "eval_clean.png"
+    )
+
+    save_tensor_image(
+        random_patched_tensor,
+        RESULTS_DIR
+        / "eval_random_patch.png"
+    )
+
+    save_tensor_image(
+        trained_patched_tensor,
+        RESULTS_DIR
+        / "eval_trained_patch.png"
+    )
+
+    # =================================================
+    # Results
+    # =================================================
+
+    print()
+    print("======================================")
+    print("RESULTS")
+    print("======================================")
+
+    print(
+        f"Clean person confidence:  "
+        f"{clean_confidence:.4f}"
+    )
+
+    print(
+        f"Random patch confidence:  "
+        f"{random_confidence:.4f}"
+    )
+
+    print(
+        f"Trained patch confidence: "
+        f"{trained_confidence:.4f}"
+    )
+
+    print()
+
+    clean_drop_random = (
+        clean_confidence
+        -
+        random_confidence
+    )
+
+    clean_drop_trained = (
+        clean_confidence
+        -
+        trained_confidence
+    )
+
+    print(
+        f"Random patch confidence drop: "
+        f"{clean_drop_random:.4f}"
+    )
+
+    print(
+        f"Trained patch confidence drop: "
+        f"{clean_drop_trained:.4f}"
+    )
+
+    print()
+
+    # ------------------------------------------------
+    # Simple interpretation
+    # ------------------------------------------------
+
+    if trained_confidence < random_confidence:
+
+        print(
+            "SUCCESS:"
+        )
+
+        print(
+            "The trained patch reduced "
+            "person confidence more than "
+            "the random patch."
+        )
+
+    else:
+
+        print(
+            "NOTE:"
+        )
+
+        print(
+            "The trained patch did not "
+            "outperform the random patch "
+            "under normal YOLO detection."
+        )
+
+    print()
+
+    if trained_confidence < CONF_THRESHOLD:
+
+        print(
+            f"At threshold "
+            f"{CONF_THRESHOLD:.2f}, "
+            f"the trained patch suppresses "
+            f"the person detection."
+        )
+
+    else:
+
+        print(
+            f"At threshold "
+            f"{CONF_THRESHOLD:.2f}, "
+            f"YOLO still detects the person."
+        )
+
+    print()
+
+    print(
+        "Saved evaluation images to:"
+    )
+
+    print(
+        RESULTS_DIR
+    )
+
+
+if __name__ == "__main__":
+    main()
