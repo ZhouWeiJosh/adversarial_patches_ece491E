@@ -26,7 +26,7 @@ WEIGHTS_PATH = (
 DATA_DIR = (
     ROOT
     / "data"
-    / "train_images"
+    / "validation_image"
 )
 
 UNIVERSAL_PATCH_PATH = (
@@ -51,12 +51,7 @@ CONF_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.4
 
 
-# IMPORTANT:
-# Training used first 50 images.
-# Skip those during validation.
-SKIP_FIRST = 50
-
-# Evaluate the next 50 unseen images.
+# Evaluate up to 50 images from validation_image.
 NUM_VALIDATION_IMAGES = 50
 
 
@@ -401,16 +396,8 @@ def main():
 
     validation_images = (
         all_images[
-            SKIP_FIRST:
-            SKIP_FIRST
-            +
-            NUM_VALIDATION_IMAGES
+            :NUM_VALIDATION_IMAGES
         ]
-    )
-
-    print(
-        f"Training images skipped: "
-        f"{SKIP_FIRST}"
     )
 
     print(
