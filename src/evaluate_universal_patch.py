@@ -26,9 +26,7 @@ WEIGHTS_PATH = (
 DATA_DIR = (
     ROOT
     / "data"
-    / "inria"
-    / "Train"
-    / "pos"
+    / "train_images"
 )
 
 UNIVERSAL_PATCH_PATH = (
