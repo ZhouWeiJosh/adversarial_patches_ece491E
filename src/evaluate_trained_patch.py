@@ -7,11 +7,7 @@ from torchvision.transforms import functional as TF
 from darknet import Darknet
 from utils import do_detect
 
-from patch_utils import (
-    create_random_patch,
-    resize_patch,
-    place_patch_on_image
-)
+from patch_utils import create_random_patch
 
 
 # ==================================================
@@ -52,26 +48,22 @@ YOLO_SIZE = 416
 CONF_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.4
 
-PATCH_SCALE = 0.25
+# IMPORTANT:
+# This should match train_one_patch.py
+PATCH_SIZE = 125
+
+# IMPORTANT:
+# This should match train_one_patch.py
+TORSO_POSITION = 0.40
 
 USE_CUDA = torch.cuda.is_available()
 
 
 # ==================================================
-# Helper
+# Get person confidence
 # ==================================================
 
 def get_best_person_confidence(boxes):
-    """
-    Return the highest final person confidence.
-
-    Assumes:
-        box[4] = objectness
-        box[5] = class confidence
-        box[6] = class ID
-
-    COCO person class = 0
-    """
 
     best_confidence = 0.0
 
@@ -79,15 +71,20 @@ def get_best_person_confidence(boxes):
 
         class_id = int(box[6])
 
+        # COCO person = class 0
         if class_id != 0:
             continue
 
         objectness = box[4]
         class_confidence = box[5]
 
-        # detach() avoids the warning you saw earlier
         if torch.is_tensor(objectness):
-            objectness = objectness.detach().cpu().item()
+            objectness = (
+                objectness
+                .detach()
+                .cpu()
+                .item()
+            )
         else:
             objectness = float(objectness)
 
@@ -103,23 +100,29 @@ def get_best_person_confidence(boxes):
                 class_confidence
             )
 
-        final_confidence = (
+        confidence = (
             objectness
-            * class_confidence
+            *
+            class_confidence
         )
 
         best_confidence = max(
             best_confidence,
-            final_confidence
+            confidence
         )
 
     return best_confidence
 
 
+# ==================================================
+# Detection
+# ==================================================
+
 def run_detection(
     model,
     image
 ):
+
     boxes = do_detect(
         model,
         image,
@@ -137,17 +140,200 @@ def run_detection(
     return boxes, confidence
 
 
+# ==================================================
+# Find best person
+# ==================================================
+
+def get_best_person_box(boxes):
+
+    person_boxes = []
+
+    for box in boxes:
+
+        class_id = int(box[6])
+
+        if class_id == 0:
+            person_boxes.append(box)
+
+    if len(person_boxes) == 0:
+
+        return None
+
+    def confidence(box):
+
+        objectness = box[4]
+        class_confidence = box[5]
+
+        if torch.is_tensor(objectness):
+            objectness = (
+                objectness
+                .detach()
+                .cpu()
+                .item()
+            )
+
+        if torch.is_tensor(class_confidence):
+            class_confidence = (
+                class_confidence
+                .detach()
+                .cpu()
+                .item()
+            )
+
+        return (
+            float(objectness)
+            *
+            float(class_confidence)
+        )
+
+    return max(
+        person_boxes,
+        key=confidence
+    )
+
+
+# ==================================================
+# Place patch relative to person
+# ==================================================
+
+def apply_patch_on_person(
+    image_tensor,
+    patch,
+    person_box
+):
+
+    """
+    image_tensor:
+        [3, H, W]
+
+    patch:
+        [3, P, P]
+
+    person_box:
+        normalized YOLO bbox:
+        [center_x, center_y, width, height, ...]
+    """
+
+    patched = image_tensor.clone()
+
+    _, image_h, image_w = (
+        patched.shape
+    )
+
+    # Convert YOLO normalized bbox
+    # into pixel coordinates
+    person_center_x = (
+        float(person_box[0])
+        *
+        image_w
+    )
+
+    person_center_y = (
+        float(person_box[1])
+        *
+        image_h
+    )
+
+    person_height = (
+        float(person_box[3])
+        *
+        image_h
+    )
+
+    # Top of person's bbox
+    person_top = (
+        person_center_y
+        -
+        person_height / 2
+    )
+
+    # Patch position
+    patch_center_x = (
+        person_center_x
+    )
+
+    patch_center_y = (
+        person_top
+        +
+        TORSO_POSITION
+        *
+        person_height
+    )
+
+    patch_h = patch.shape[1]
+    patch_w = patch.shape[2]
+
+    x1 = int(
+        patch_center_x
+        -
+        patch_w / 2
+    )
+
+    y1 = int(
+        patch_center_y
+        -
+        patch_h / 2
+    )
+
+    x2 = x1 + patch_w
+    y2 = y1 + patch_h
+
+    # Keep inside image
+    x1 = max(
+        0,
+        x1
+    )
+
+    y1 = max(
+        0,
+        y1
+    )
+
+    x2 = min(
+        image_w,
+        x2
+    )
+
+    y2 = min(
+        image_h,
+        y2
+    )
+
+    patch_width = (
+        x2 - x1
+    )
+
+    patch_height = (
+        y2 - y1
+    )
+
+    patched[
+        :,
+        y1:y2,
+        x1:x2
+    ] = patch[
+        :,
+        0:patch_height,
+        0:patch_width
+    ]
+
+    return patched
+
+
+# ==================================================
+# Save tensor image
+# ==================================================
+
 def save_tensor_image(
     tensor,
     path
 ):
-    """
-    tensor expected shape:
-        [3, H, W]
-    """
 
     image = TF.to_pil_image(
-        tensor.detach().cpu()
+        tensor
+        .detach()
+        .cpu()
+        .clamp(0, 1)
     )
 
     path.parent.mkdir(
@@ -176,7 +362,7 @@ def main():
     print()
 
     # ------------------------------------------------
-    # File checks
+    # Check patch
     # ------------------------------------------------
 
     if not TRAINED_PATCH_PATH.exists():
@@ -226,7 +412,6 @@ def main():
         f"{original_image.size}"
     )
 
-    # Match training dimensions
     image = original_image.resize(
         (
             YOLO_SIZE,
@@ -243,10 +428,6 @@ def main():
         image
     )
 
-    _, height, width = (
-        image_tensor.shape
-    )
-
     # =================================================
     # 1. CLEAN
     # =================================================
@@ -261,34 +442,50 @@ def main():
         )
     )
 
+    # ------------------------------------------------
+    # Get person bbox from CLEAN image
+    # ------------------------------------------------
+
+    person_box = (
+        get_best_person_box(
+            clean_boxes
+        )
+    )
+
+    if person_box is None:
+
+        print(
+            "ERROR: No person detected."
+        )
+
+        return
+
+    print()
+    print("Person found.")
+
+    print(
+        "Bounding box:",
+        person_box[:4]
+    )
+
     # =================================================
     # 2. RANDOM PATCH
     # =================================================
 
-    print("Running RANDOM PATCH detection...")
-
-    random_patch = (
-        create_random_patch(
-            patch_size=100
-        )
+    print()
+    print(
+        "Running RANDOM PATCH detection..."
     )
 
-    target_patch_size = int(
-        width
-        * PATCH_SCALE
-    )
-
-    random_patch = resize_patch(
-        random_patch,
-        target_patch_size
+    random_patch = create_random_patch(
+        patch_size=PATCH_SIZE
     )
 
     random_patched_tensor = (
-        place_patch_on_image(
+        apply_patch_on_person(
             image_tensor,
             random_patch,
-            width // 2,
-            height // 2
+            person_box
         )
     )
 
@@ -310,7 +507,9 @@ def main():
     # 3. TRAINED PATCH
     # =================================================
 
-    print("Running TRAINED PATCH detection...")
+    print(
+        "Running TRAINED PATCH detection..."
+    )
 
     trained_patch_image = (
         Image.open(
@@ -323,17 +522,38 @@ def main():
         trained_patch_image
     )
 
-    trained_patch = resize_patch(
-        trained_patch,
-        target_patch_size
-    )
+    # ------------------------------------------------
+    # Make absolutely sure it matches training size
+    # ------------------------------------------------
+
+    if (
+        trained_patch.shape[1]
+        != PATCH_SIZE
+        or
+        trained_patch.shape[2]
+        != PATCH_SIZE
+    ):
+
+        trained_patch_image = (
+            trained_patch_image.resize(
+                (
+                    PATCH_SIZE,
+                    PATCH_SIZE
+                )
+            )
+        )
+
+        trained_patch = (
+            TF.to_tensor(
+                trained_patch_image
+            )
+        )
 
     trained_patched_tensor = (
-        place_patch_on_image(
+        apply_patch_on_person(
             image_tensor,
             trained_patch,
-            width // 2,
-            height // 2
+            person_box
         )
     )
 
@@ -427,15 +647,17 @@ def main():
 
     print()
 
-    # ------------------------------------------------
-    # Simple interpretation
-    # ------------------------------------------------
+    # =================================================
+    # Interpretation
+    # =================================================
 
-    if trained_confidence < random_confidence:
+    if (
+        trained_confidence
+        <
+        random_confidence
+    ):
 
-        print(
-            "SUCCESS:"
-        )
+        print("SUCCESS:")
 
         print(
             "The trained patch reduced "
@@ -445,19 +667,20 @@ def main():
 
     else:
 
-        print(
-            "NOTE:"
-        )
+        print("NOTE:")
 
         print(
             "The trained patch did not "
-            "outperform the random patch "
-            "under normal YOLO detection."
+            "outperform the random patch."
         )
 
     print()
 
-    if trained_confidence < CONF_THRESHOLD:
+    if (
+        trained_confidence
+        <
+        CONF_THRESHOLD
+    ):
 
         print(
             f"At threshold "
