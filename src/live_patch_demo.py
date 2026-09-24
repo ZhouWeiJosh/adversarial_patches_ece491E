@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 CFG_PATH = ROOT / "cfg" / "yolo.cfg"
 WEIGHTS_PATH = ROOT / "weights" / "yolo.weights"
-PATCH_PATH = ROOT / "patches" / "universal_patch.png"
+PATCH_PATH = ROOT / "patches" / "universal_patch_obj.png"
 
 
 # ============================================================

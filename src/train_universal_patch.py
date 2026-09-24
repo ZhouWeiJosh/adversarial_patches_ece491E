@@ -1,42 +1,5 @@
 from pathlib import Path
 import random
-
-import torch
-from PIL import Image
-from torchvision.transforms import functional as TF
-
-from darknet import Darknet
-from utils import do_detect
-from yolo_loss import YOLOv2PersonLoss
-
-
-# ==================================================
-# Paths
-# ==================================================
-
-ROOT = Path(__file__).resolve().parent.parent
-
-CFG_PATH = ROOT / "cfg" / "yolo.cfg"
-
-WEIGHTS_PATH = (
-    ROOT
-    / "weights"
-    / "yolo.weights"
-)
-
-TRAIN_DIR = (
-    ROOT
-    / "data"
-    / "train_images"
-)
-
-PATCH_OUTPUT = (
-    ROOT
-    / "patches"
-    / "universal_patch.png"
-)
-from pathlib import Path
-import random
 import math
 
 import torch
@@ -49,7 +12,6 @@ from darknet import Darknet
 from utils import do_detect
 from yolo_loss import YOLOv2PersonLoss
 
-
 # ==================================================
 # Paths
 # ==================================================
@@ -74,6 +36,35 @@ PATCH_OUTPUT = (
     ROOT
     / "patches"
     / "universal_patch.png"
+)
+
+
+# ==================================================
+# Paths
+# ==================================================
+
+ROOT = Path(__file__).resolve().parent.parent
+
+CFG_PATH = ROOT / "cfg" / "yolo.cfg"
+
+WEIGHTS_PATH = (
+    ROOT
+    / "weights"
+    / "yolo.weights"
+)
+
+TRAIN_DIR = (
+    ROOT
+    / "data"
+    / "train_images"
+)
+
+ATTACK_TYPE = "cls"
+
+PATCH_OUTPUT = (
+    ROOT
+    / "patches"
+    / "universal_patch_{ATTACK_TYPE}.png"
 )
 
 # If you cloned the original adversarial-yolo repository,
@@ -93,11 +84,9 @@ IMAGE_SIZE = 416
 
 PATCH_SIZE = 125
 
-NUM_EPOCHS = 5
+NUM_EPOCHS = 10
 
 LEARNING_RATE = 0.03
-
-ATTACK_TYPE = "obj"
 
 CONF_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.4
@@ -147,7 +136,7 @@ MAX_NOISE = 0.10
 
 # Start small while debugging.
 # Change to None when ready to use everything.
-MAX_IMAGES = 50
+MAX_IMAGES = 100
 
 
 DEVICE = torch.device(

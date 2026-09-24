@@ -110,8 +110,6 @@ class YOLOv2PersonLoss(nn.Module):
             # where YOLO believes the object is a person.
             score = (
                 objectness
-                *
-                person_probability
             )
 
         elif self.attack_type == "cls":
@@ -137,7 +135,7 @@ class YOLOv2PersonLoss(nn.Module):
         # Highest-scoring YOLO prediction
         # --------------------------------------
 
-        max_score = score.view(
+        max_score = score.reshape(
             batch_size,
             -1
         ).max(dim=1).values

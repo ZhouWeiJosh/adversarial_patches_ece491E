@@ -21,9 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 CFG_PATH = ROOT / "cfg" / "yolo.cfg"
 WEIGHTS_PATH = ROOT / "weights" / "yolo.weights"
-DATA_DIR = ROOT / "data" / "validation_image"
+DATA_DIR = ROOT / "data" / "validation_images"
 
-UNIVERSAL_PATCH_PATH = ROOT / "patches" / "universal_patch.png"
+UNIVERSAL_PATCH_PATH = ROOT / "patches" / "universal_patch_obj.png"
 
 OUTPUT_DIR = ROOT / "results"
 OUTPUT_PLOT = OUTPUT_DIR / "pr_curve.png"

@@ -26,13 +26,13 @@ WEIGHTS_PATH = (
 DATA_DIR = (
     ROOT
     / "data"
-    / "validation_image"
+    / "validation_images"
 )
 
 UNIVERSAL_PATCH_PATH = (
     ROOT
     / "patches"
-    / "universal_patch.png"
+    / "universal_patch_cls.png"
 )
 
 
@@ -52,7 +52,7 @@ NMS_THRESHOLD = 0.4
 
 
 # Evaluate up to 50 images from validation_image.
-NUM_VALIDATION_IMAGES = 50
+NUM_VALIDATION_IMAGES = 20
 
 
 USE_CUDA = torch.cuda.is_available()
